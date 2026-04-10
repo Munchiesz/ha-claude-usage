@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Claude Usage HA Integration — Design Spec</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f5f5f5; color: #1a1a1a; line-height: 1.6; }
+  .container { max-width: 800px; margin: 2rem auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 3rem; }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; color: #d4763b; }
+  .subtitle { color: #666; font-size: 0.95rem; margin-bottom: 2rem; border-bottom: 2px solid #f0f0f0; padding-bottom: 1rem; }
+  h2 { font-size: 1.3rem; margin-top: 2rem; margin-bottom: 0.75rem; color: #333; border-left: 4px solid #d4763b; padding-left: 0.75rem; }
+  p { margin-bottom: 1rem; }
+  ul, ol { margin-bottom: 1rem; padding-left: 1.5rem; }
+  li { margin-bottom: 0.4rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.9rem; }
+  th { background: #f8f8f8; text-align: left; padding: 0.6rem 0.75rem; border-bottom: 2px solid #e0e0e0; }
+  td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee; }
+  tr:hover td { background: #fafafa; }
+  .callout { background: #fff8f0; border: 1px solid #f0d8c0; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .callout-title { font-weight: 600; color: #d4763b; margin-bottom: 0.3rem; }
+  .badge { display: inline-block; background: #e8f5e9; color: #2e7d32; font-size: 0.8rem; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 500; }
+  .badge-warn { background: #fff3e0; color: #e65100; }
+  .flow-step { display: flex; align-items: flex-start; margin-bottom: 0.75rem; }
+  .flow-num { background: #d4763b; color: #fff; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 600; flex-shrink: 0; margin-right: 0.75rem; margin-top: 0.1rem; }
+  .flow-text { flex: 1; }
+  .sensor-card { background: #f8f9fa; border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.75rem; }
+  .sensor-icon { font-size: 1.5rem; width: 40px; text-align: center; }
+  .sensor-info { flex: 1; }
+  .sensor-name { font-weight: 600; font-size: 0.95rem; }
+  .sensor-detail { font-size: 0.85rem; color: #666; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Claude Usage Integration for Home Assistant</h1>
+<p class="subtitle">Design Spec &mdash; April 10, 2026</p>
+
+<h2>What This Does</h2>
+<p>A Home Assistant integration that automatically checks your Claude subscription usage every 5 minutes and shows the data as sensors in HA. You can use these sensors on dashboards, in automations, or anywhere else in Home Assistant.</p>
+
+<h2>How You Install It</h2>
+<ol>
+  <li>Add the GitHub repository in HACS (one-time)</li>
+  <li>Install the integration and restart HA</li>
+  <li>Go to Settings &rarr; Integrations &rarr; Add "Claude Usage"</li>
+  <li>Choose how to connect (see below)</li>
+</ol>
+
+<h2>How You Connect It</h2>
+<p>When you add the integration, you'll see two options:</p>
+
+<div class="callout">
+  <div class="callout-title">Option 1 &mdash; Login with Claude <span class="badge">Preferred</span></div>
+  <p>Click a button, get redirected to Claude's login page, sign in, and you're done. Tokens are pulled automatically.</p>
+  <p><em>Note: This may not work if Anthropic's servers reject the redirect. If it fails, use Option 2.</em></p>
+</div>
+
+<div class="callout">
+  <div class="callout-title">Option 2 &mdash; Paste a Token <span class="badge badge-warn">Fallback</span></div>
+  <p>Copy a refresh token from your PC (from the file <code>~/.claude/.credentials.json</code>) and paste it into the setup screen. The integration validates it immediately and you're set.</p>
+</div>
+
+<p>Both options end up in the same place &mdash; the integration has what it needs to talk to Claude's servers and will keep the connection alive on its own.</p>
+
+<h2>How It Stays Connected</h2>
+<p>The integration manages its own authentication, completely independent from Claude Code on your PC:</p>
+<ul>
+  <li>Access tokens last about 8 hours</li>
+  <li>Before they expire, the integration automatically gets a new one</li>
+  <li>New tokens are stored securely inside HA</li>
+  <li>If anything goes wrong, it retries on the next poll &mdash; no manual intervention needed</li>
+</ul>
+
+<h2>What Sensors You Get</h2>
+<p>All sensors appear under a single device called <strong>"Claude Subscription"</strong>:</p>
+
+<div class="sensor-card">
+  <div class="sensor-icon">&#9899;</div>
+  <div class="sensor-info">
+    <div class="sensor-name">Session Utilization</div>
+    <div class="sensor-detail">Your current 5-hour usage window &mdash; shown as a percentage (e.g., 44%)</div>
+  </div>
+</div>
+
+<div class="sensor-card">
+  <div class="sensor-icon">&#9203;</div>
+  <div class="sensor-info">
+    <div class="sensor-name">Session Resets At</div>
+    <div class="sensor-detail">When your 5-hour window resets &mdash; includes a "minutes until reset" countdown</div>
+  </div>
+</div>
+
+<div class="sensor-card">
+  <div class="sensor-icon">&#128200;</div>
+  <div class="sensor-info">
+    <div class="sensor-name">Weekly Utilization</div>
+    <div class="sensor-detail">Your 7-day usage &mdash; shown as a percentage (e.g., 13%)</div>
+  </div>
+</div>
+
+<div class="sensor-card">
+  <div class="sensor-icon">&#128197;</div>
+  <div class="sensor-info">
+    <div class="sensor-name">Weekly Resets At</div>
+    <div class="sensor-detail">When your 7-day window resets &mdash; includes a "minutes until reset" countdown</div>
+  </div>
+</div>
+
+<div class="sensor-card">
+  <div class="sensor-icon">&#128176;</div>
+  <div class="sensor-info">
+    <div class="sensor-name">Extra Credits Used</div>
+    <div class="sensor-detail">How many extra-usage credits you've spent this month (e.g., 1,628 of 10,000). Only shows if extra usage is enabled on your plan.</div>
+  </div>
+</div>
+
+<div class="sensor-card">
+  <div class="sensor-icon">&#128179;</div>
+  <div class="sensor-info">
+    <div class="sensor-name">Extra Usage Utilization</div>
+    <div class="sensor-detail">Extra credits used as a percentage of your monthly limit (e.g., 16.28%). Only shows if extra usage is enabled on your plan.</div>
+  </div>
+</div>
+
+<h2>Settings You Can Change</h2>
+<p>After setup, go to the integration's "Configure" button to adjust:</p>
+<ul>
+  <li><strong>Poll interval:</strong> How often to check usage (default: every 5 minutes, range: 1&ndash;30 minutes)</li>
+</ul>
+
+<h2>What Happens When Things Go Wrong</h2>
+<table>
+  <tr><th>Situation</th><th>What Happens</th></tr>
+  <tr><td>Token expires</td><td>Auto-refreshes before it expires &mdash; you never notice</td></tr>
+  <tr><td>Network issue or API error</td><td>Keeps the last known data, retries on the next cycle</td></tr>
+  <tr><td>Extra usage not on your plan</td><td>Those two sensors simply don't appear</td></tr>
+  <tr><td>Bad token during setup</td><td>Shows an error message, lets you try again</td></tr>
+</table>
+<p>The integration should never crash or need manual fixes after the initial setup.</p>
+
+<h2>What's Next</h2>
+<p>After the integration is built and working, a <strong>Mushroom dashboard card</strong> will be created to display session %, weekly %, reset countdowns, and extra usage in a nice visual layout.</p>
+
+</div>
+</body>
+</html>
