@@ -1,0 +1,44 @@
+"""The Claude Usage integration."""
+
+from __future__ import annotations
+
+from datetime import timedelta
+
+from homeassistant.core import HomeAssistant
+
+from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .coordinator import ClaudeUsageConfigEntry, ClaudeUsageCoordinator
+
+PLATFORMS = ["sensor"]
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ClaudeUsageConfigEntry
+) -> bool:
+    """Set up Claude Usage from a config entry."""
+    coordinator = ClaudeUsageCoordinator(hass, entry)
+    await coordinator.async_config_entry_first_refresh()
+
+    entry.runtime_data = coordinator
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    return True
+
+
+async def _async_update_listener(
+    hass: HomeAssistant, entry: ClaudeUsageConfigEntry
+) -> None:
+    """Handle options update — adjust the coordinator poll interval."""
+    coordinator: ClaudeUsageCoordinator = entry.runtime_data
+    coordinator.update_interval = timedelta(
+        seconds=entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)
+    )
+
+
+async def async_unload_entry(
+    hass: HomeAssistant, entry: ClaudeUsageConfigEntry
+) -> bool:
+    """Unload a config entry."""
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
