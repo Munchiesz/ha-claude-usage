@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "menu_options": {
+          "oauth": "Login with Claude",
+          "manual": "Enter token manually"
+        }
+      },
+      "manual": {
+        "title": "Enter refresh token",
+        "description": "Paste your Claude refresh token. You can find it in `~/.claude/.credentials.json` on a machine with Claude Code installed \u2014 look for the `refreshToken` field under `claudeAiOauth`.",
+        "data": {
+          "refresh_token": "Refresh token"
+        }
+      }
+    },
+    "error": {
+      "invalid_token": "Token is invalid or expired. Please check and try again.",
+      "cannot_connect": "Cannot connect to Claude API. Check your network connection.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "Claude Usage is already configured.",
+      "oauth_failed": "OAuth login failed. Please use the manual token option instead."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Claude Usage settings",
+        "data": {
+          "scan_interval": "Update interval (seconds)"
+        }
+      }
+    }
+  }
+}
