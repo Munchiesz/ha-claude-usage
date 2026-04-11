@@ -120,7 +120,7 @@ EXTRA_USAGE_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
         value_fn=lambda d: d.get("extra_usage", {}).get("used_credits"),
         extra_attrs_fn=lambda d: {
             "monthly_limit": d.get("extra_usage", {}).get("monthly_limit"),
-            "last_reset": d.get("extra_usage", {}).get("resets_at", ""),
+            "resets_at": d.get("extra_usage", {}).get("resets_at", ""),
         },
     ),
     ClaudeUsageSensorDescription(

@@ -144,6 +144,7 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                         msg += f" (retry after {retry_after}s)"
                     except ValueError:
+                        self.update_interval = self._default_interval * 2
                         msg += f" (retry after {retry_after})"
                 else:
                     self.update_interval = self._default_interval * 2

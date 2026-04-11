@@ -201,6 +201,25 @@ async def test_429_without_retry_after_doubles_interval(
 
 
 @pytest.mark.asyncio
+async def test_429_with_http_date_retry_after_doubles_interval(
+    mock_hass: MagicMock, mock_config_entry: MagicMock
+) -> None:
+    """Test that a non-numeric Retry-After (HTTP-date) doubles the interval."""
+    coordinator = _make_coordinator(mock_hass, mock_config_entry)
+    default = coordinator._default_interval
+    coordinator.session.get = MagicMock(
+        return_value=create_mock_response(
+            429, headers={"Retry-After": "Fri, 11 Apr 2026 12:30:00 GMT"}
+        )
+    )
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_fetch_usage("test-token")
+
+    assert coordinator.update_interval == default * 2
+
+
+@pytest.mark.asyncio
 async def test_429_retry_after_smaller_than_default_uses_default(
     mock_hass: MagicMock, mock_config_entry: MagicMock
 ) -> None:
