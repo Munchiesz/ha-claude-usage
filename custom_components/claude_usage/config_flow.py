@@ -142,6 +142,47 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reconfiguration — update the refresh token."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            session = async_get_clientsession(self.hass)
+            custom_client_id = user_input.get(CONF_CLIENT_ID) or CLIENT_ID
+            token_data, error_key = await _async_validate_refresh_token(
+                session, user_input[CONF_REFRESH_TOKEN], custom_client_id
+            )
+
+            if token_data is None:
+                errors["base"] = error_key
+            else:
+                access_token = token_data.get("access_token")
+                if not access_token:
+                    errors["base"] = "invalid_token"
+                else:
+                    data = {
+                        CONF_ACCESS_TOKEN: access_token,
+                        CONF_REFRESH_TOKEN: token_data.get(
+                            "refresh_token", user_input[CONF_REFRESH_TOKEN]
+                        ),
+                        CONF_EXPIRES_AT: time.time()
+                        + token_data.get("expires_in", 28800),
+                    }
+                    if user_input.get(CONF_CLIENT_ID):
+                        data[CONF_CLIENT_ID] = user_input[CONF_CLIENT_ID]
+                    return self.async_update_reload_and_abort(
+                        self._get_reconfigure_entry(),
+                        data=data,
+                    )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=MANUAL_SCHEMA,
+            errors=errors,
+        )
+
 
 class ClaudeUsageOptionsFlow(OptionsFlow):
     """Handle options for Claude Usage."""

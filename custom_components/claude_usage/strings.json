@@ -11,6 +11,17 @@
         "data_description": {
           "client_id": "Leave blank to use the default. Only set this if you have your own Anthropic OAuth client ID."
         }
+      },
+      "reconfigure": {
+        "title": "Update refresh token",
+        "description": "Paste a new Claude refresh token to replace the current one.",
+        "data": {
+          "refresh_token": "Refresh token",
+          "client_id": "OAuth Client ID (optional)"
+        },
+        "data_description": {
+          "client_id": "Leave blank to use the default. Only set this if you have your own Anthropic OAuth client ID."
+        }
       }
     },
     "error": {
