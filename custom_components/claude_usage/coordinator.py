@@ -142,9 +142,11 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         self.update_interval = timedelta(
                             seconds=max(delay, int(self._default_interval.total_seconds()))
                         )
+                        msg += f" (retry after {retry_after}s)"
                     except ValueError:
-                        pass
-                    msg += f" (retry after {retry_after}s)"
+                        msg += f" (retry after {retry_after})"
+                else:
+                    self.update_interval = self._default_interval * 2
                 _LOGGER.warning(msg)
                 raise UpdateFailed(msg)
             resp.raise_for_status()
