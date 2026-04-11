@@ -5,7 +5,11 @@
         "title": "Enter refresh token",
         "description": "Paste your Claude refresh token. You can find it in `~/.claude/.credentials.json` on a machine with Claude Code installed \u2014 look for the `refreshToken` field under `claudeAiOauth`.",
         "data": {
-          "refresh_token": "Refresh token"
+          "refresh_token": "Refresh token",
+          "client_id": "OAuth Client ID (optional)"
+        },
+        "data_description": {
+          "client_id": "Leave blank to use the default. Only set this if you have your own Anthropic OAuth client ID."
         }
       }
     },

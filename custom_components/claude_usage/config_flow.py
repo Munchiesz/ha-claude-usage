@@ -22,6 +22,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CLIENT_ID,
     CONF_ACCESS_TOKEN,
+    CONF_CLIENT_ID,
     CONF_EXPIRES_AT,
     CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL,
@@ -38,6 +39,7 @@ _LOGGER = logging.getLogger(__name__)
 MANUAL_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_REFRESH_TOKEN): str,
+        vol.Optional(CONF_CLIENT_ID): str,
     }
 )
 
@@ -54,7 +56,9 @@ OPTIONS_SCHEMA = vol.Schema(
 
 
 async def _async_validate_refresh_token(
-    session: aiohttp.ClientSession, refresh_token: str
+    session: aiohttp.ClientSession,
+    refresh_token: str,
+    client_id: str = CLIENT_ID,
 ) -> tuple[dict[str, Any] | None, str]:
     """Validate a refresh token by exchanging it.
 
@@ -66,12 +70,14 @@ async def _async_validate_refresh_token(
             json={
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
-                "client_id": CLIENT_ID,
+                "client_id": client_id,
                 "scope": TOKEN_SCOPES,
             },
             headers={"Content-Type": "application/json"},
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
+            if resp.status >= 500:
+                return None, "cannot_connect"
             if resp.status != 200:
                 return None, "invalid_token"
             return await resp.json(), ""
@@ -103,8 +109,9 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             session = async_get_clientsession(self.hass)
+            custom_client_id = user_input.get(CONF_CLIENT_ID) or CLIENT_ID
             token_data, error_key = await _async_validate_refresh_token(
-                session, user_input[CONF_REFRESH_TOKEN]
+                session, user_input[CONF_REFRESH_TOKEN], custom_client_id
             )
 
             if token_data is None:
@@ -114,16 +121,19 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not access_token:
                     errors["base"] = "invalid_token"
                 else:
+                    data = {
+                        CONF_ACCESS_TOKEN: access_token,
+                        CONF_REFRESH_TOKEN: token_data.get(
+                            "refresh_token", user_input[CONF_REFRESH_TOKEN]
+                        ),
+                        CONF_EXPIRES_AT: time.time()
+                        + token_data.get("expires_in", 28800),
+                    }
+                    if user_input.get(CONF_CLIENT_ID):
+                        data[CONF_CLIENT_ID] = user_input[CONF_CLIENT_ID]
                     return self.async_create_entry(
                         title="Claude Usage",
-                        data={
-                            CONF_ACCESS_TOKEN: access_token,
-                            CONF_REFRESH_TOKEN: token_data.get(
-                                "refresh_token", user_input[CONF_REFRESH_TOKEN]
-                            ),
-                            CONF_EXPIRES_AT: time.time()
-                            + token_data.get("expires_in", 28800),
-                        },
+                        data=data,
                     )
 
         return self.async_show_form(

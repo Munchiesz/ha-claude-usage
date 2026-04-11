@@ -33,9 +33,11 @@ async def _async_update_listener(
 ) -> None:
     """Handle options update — adjust the coordinator poll interval."""
     coordinator: ClaudeUsageCoordinator = entry.runtime_data
-    coordinator.update_interval = timedelta(
+    new_interval = timedelta(
         seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     )
+    coordinator._default_interval = new_interval
+    coordinator.update_interval = new_interval
 
 
 async def async_unload_entry(
