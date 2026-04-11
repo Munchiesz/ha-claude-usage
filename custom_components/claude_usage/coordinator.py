@@ -23,6 +23,7 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_EXPIRES_AT,
     CONF_REFRESH_TOKEN,
+    CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     TOKEN_REFRESH_BUFFER_SECS,
@@ -34,6 +35,10 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 type ClaudeUsageConfigEntry = ConfigEntry[ClaudeUsageCoordinator]
+
+
+class _TokenExpiredError(Exception):
+    """Raised when the API returns 401, indicating the token has expired."""
 
 
 class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -48,7 +53,7 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Initialize the coordinator."""
         self.session = async_get_clientsession(hass)
-        interval = entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)
+        interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         super().__init__(
             hass,
             _LOGGER,
@@ -86,7 +91,9 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (aiohttp.ClientError, TimeoutError) as err:
             raise UpdateFailed(f"Token refresh failed: {err}") from err
 
-        new_access = data["access_token"]
+        new_access = data.get("access_token")
+        if not new_access:
+            raise UpdateFailed("Token refresh returned no access_token")
         new_refresh = data.get("refresh_token", refresh_token)
         expires_at = time.time() + data.get("expires_in", 28800)
 
@@ -122,7 +129,14 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             timeout=aiohttp.ClientTimeout(total=30),
         ) as resp:
             if resp.status == 401:
-                return {"_needs_retry": True}
+                raise _TokenExpiredError
+            if resp.status == 429:
+                retry_after = resp.headers.get("Retry-After")
+                msg = "Rate limited by Claude API"
+                if retry_after:
+                    msg += f" (retry after {retry_after}s)"
+                _LOGGER.warning(msg)
+                raise UpdateFailed(msg)
             resp.raise_for_status()
             return await resp.json()
 
@@ -131,18 +145,17 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             token = await self._async_get_valid_token()
             data = await self._async_fetch_usage(token)
-
-            # On 401, force-refresh and retry once
-            if data.get("_needs_retry"):
-                _LOGGER.warning("Got 401 — forcing token refresh and retrying")
-                token = await self._async_refresh_token()
-                data = await self._async_fetch_usage(token)
-                if data.get("_needs_retry"):
-                    raise ConfigEntryAuthFailed(
-                        "API returned 401 after token refresh"
-                    )
-
             return data
+
+        except _TokenExpiredError:
+            _LOGGER.warning("Got 401 — forcing token refresh and retrying")
+            try:
+                token = await self._async_refresh_token()
+                return await self._async_fetch_usage(token)
+            except _TokenExpiredError:
+                raise ConfigEntryAuthFailed(
+                    "API returned 401 after token refresh"
+                )
 
         except ConfigEntryAuthFailed:
             raise

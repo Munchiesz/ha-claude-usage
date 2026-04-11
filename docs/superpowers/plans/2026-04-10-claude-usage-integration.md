@@ -884,7 +884,7 @@ Settings → Devices & Services → Add Integration → search "Claude Usage". S
 
 Choose "Enter token manually". Paste the refresh token:
 ```
-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
+<your-refresh-token-here>
 ```
 
 Note: you will need a fresh refresh token first — run `claude` on your PC to regenerate one, then copy from `~/.claude/.credentials.json`.

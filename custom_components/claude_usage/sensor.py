@@ -11,6 +11,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -34,6 +35,16 @@ def _minutes_until(iso_ts: str | None) -> int | None:
         return None
 
 
+def _parse_timestamp(iso_ts: str | None) -> datetime | None:
+    """Parse an ISO timestamp string into a datetime object."""
+    if not iso_ts:
+        return None
+    try:
+        return datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
 @dataclass(frozen=True, kw_only=True)
 class ClaudeUsageSensorDescription(SensorEntityDescription):
     """Describe a Claude Usage sensor."""
@@ -45,9 +56,9 @@ class ClaudeUsageSensorDescription(SensorEntityDescription):
 SENSOR_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ClaudeUsageSensorDescription(
         key="session_utilization",
-        translation_key="session_utilization",
         name="Session Utilization",
         native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:gauge",
         value_fn=lambda d: d.get("five_hour", {}).get("utilization"),
         extra_attrs_fn=lambda d: {
@@ -59,7 +70,6 @@ SENSOR_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ),
     ClaudeUsageSensorDescription(
         key="session_resets_at",
-        translation_key="session_resets_at",
         name="Session Resets At",
         icon="mdi:timer-sand",
         device_class=SensorDeviceClass.TIMESTAMP,
@@ -72,9 +82,9 @@ SENSOR_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ),
     ClaudeUsageSensorDescription(
         key="weekly_utilization",
-        translation_key="weekly_utilization",
         name="Weekly Utilization",
         native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:chart-line",
         value_fn=lambda d: d.get("seven_day", {}).get("utilization"),
         extra_attrs_fn=lambda d: {
@@ -86,7 +96,6 @@ SENSOR_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ),
     ClaudeUsageSensorDescription(
         key="weekly_resets_at",
-        translation_key="weekly_resets_at",
         name="Weekly Resets At",
         icon="mdi:calendar-clock",
         device_class=SensorDeviceClass.TIMESTAMP,
@@ -102,9 +111,9 @@ SENSOR_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
 EXTRA_USAGE_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ClaudeUsageSensorDescription(
         key="extra_credits_used",
-        translation_key="extra_credits_used",
         name="Extra Credits Used",
         native_unit_of_measurement="credits",
+        state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:currency-usd",
         value_fn=lambda d: d.get("extra_usage", {}).get("used_credits"),
         extra_attrs_fn=lambda d: {
@@ -113,9 +122,9 @@ EXTRA_USAGE_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ),
     ClaudeUsageSensorDescription(
         key="extra_utilization",
-        translation_key="extra_utilization",
         name="Extra Usage Utilization",
         native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:credit-card-clock",
         value_fn=lambda d: d.get("extra_usage", {}).get("utilization"),
         extra_attrs_fn=lambda d: {
@@ -124,16 +133,6 @@ EXTRA_USAGE_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
         },
     ),
 )
-
-
-def _parse_timestamp(iso_ts: str | None) -> datetime | None:
-    """Parse an ISO timestamp string into a datetime object."""
-    if not iso_ts:
-        return None
-    try:
-        return datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
 
 
 async def async_setup_entry(

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
 from .coordinator import ClaudeUsageConfigEntry, ClaudeUsageCoordinator
 
-PLATFORMS = ["sensor"]
+PLATFORMS = [Platform.SENSOR]
 
 
 async def async_setup_entry(
@@ -33,7 +34,7 @@ async def _async_update_listener(
     """Handle options update — adjust the coordinator poll interval."""
     coordinator: ClaudeUsageCoordinator = entry.runtime_data
     coordinator.update_interval = timedelta(
-        seconds=entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)
+        seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     )
 
 
