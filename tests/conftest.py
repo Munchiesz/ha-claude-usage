@@ -133,6 +133,7 @@ _stub_module("homeassistant.config_entries", {
     "ConfigFlow": _ConfigFlow,
     "ConfigFlowResult": _ConfigFlowResult,
     "OptionsFlow": _OptionsFlow,
+    "SOURCE_RECONFIGURE": "reconfigure",
 })
 _stub_module("homeassistant.helpers")
 _stub_module("homeassistant.helpers.aiohttp_client", {

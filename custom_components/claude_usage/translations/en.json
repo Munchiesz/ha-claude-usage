@@ -2,19 +2,34 @@
   "config": {
     "step": {
       "user": {
-        "title": "Enter refresh token",
-        "description": "Paste your Claude refresh token. You can find it in `~/.claude/.credentials.json` on a machine with Claude Code installed \u2014 look for the `refreshToken` field under `claudeAiOauth`.",
-        "data": {
-          "refresh_token": "Refresh token",
-          "client_id": "OAuth Client ID (optional)"
-        },
-        "data_description": {
-          "client_id": "Leave blank to use the default. Only set this if you have your own Anthropic OAuth client ID."
+        "title": "Set up Claude Usage",
+        "description": "Choose how to connect your Claude account.",
+        "menu_options": {
+          "auth": "Log in with Claude (recommended)",
+          "manual": "Paste refresh token manually"
         }
       },
       "reconfigure": {
-        "title": "Update refresh token",
-        "description": "Paste a new Claude refresh token to replace the current one.",
+        "title": "Update Claude credentials",
+        "description": "Choose how to update your Claude credentials.",
+        "menu_options": {
+          "auth": "Log in with Claude (recommended)",
+          "manual": "Paste a new refresh token manually"
+        }
+      },
+      "auth": {
+        "title": "Log in with Claude",
+        "description": "1. **[Open the Claude login page]({auth_url})** in a new tab.\n2. Approve the request \u2014 Claude will redirect you to a page with an authorization code.\n3. Copy the code from that page (it looks like `abc123#xyz789`) and paste it below.",
+        "data": {
+          "code": "Authorization code"
+        },
+        "data_description": {
+          "code": "Paste the full `code#state` string shown after you approve."
+        }
+      },
+      "manual": {
+        "title": "Paste refresh token",
+        "description": "Paste your Claude refresh token. You can find it in `~/.claude/.credentials.json` on a machine with Claude Code installed \u2014 look for the `refreshToken` field under `claudeAiOauth`.",
         "data": {
           "refresh_token": "Refresh token",
           "client_id": "OAuth Client ID (optional)"
@@ -26,6 +41,8 @@
     },
     "error": {
       "invalid_token": "Token is invalid or expired. Please check and try again.",
+      "invalid_code": "Authorization code is invalid or expired. Please log in again and copy a fresh code.",
+      "invalid_state": "Security check failed (state mismatch). Please log in again and copy a fresh code.",
       "cannot_connect": "Cannot connect to Claude API. Check your network connection."
     },
     "abort": {
