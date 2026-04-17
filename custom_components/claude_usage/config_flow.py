@@ -222,7 +222,11 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Reconfiguration — offer OAuth re-auth or manual token update."""
-        await self.async_set_unique_id(DOMAIN)
+        # raise_on_progress=False: a previous reconfigure flow may still be
+        # registered (e.g. user closed the dialog after an expired-code error
+        # without explicitly aborting). Default behavior would trip
+        # "already_in_progress" and lock the user out of retrying.
+        await self.async_set_unique_id(DOMAIN, raise_on_progress=False)
         self._abort_if_unique_id_mismatch()
         return self.async_show_menu(
             step_id="reconfigure",

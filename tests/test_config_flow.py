@@ -389,6 +389,31 @@ async def test_auth_step_accepts_matching_state(monkeypatch) -> None:
     assert result["type"] == "create_entry"
 
 
+# --- async_step_reconfigure tests ---
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_allows_retry_when_prior_flow_in_progress() -> None:
+    """Reconfigure must not abort with already_in_progress if a stale flow exists.
+
+    If a previous reconfigure flow errored out (e.g. expired auth code) and the
+    user closed the dialog without it aborting cleanly, a second reconfigure
+    attempt would otherwise hit `already_in_progress` and lock them out.
+    """
+    from custom_components.claude_usage.config_flow import ClaudeUsageConfigFlow
+
+    flow = ClaudeUsageConfigFlow()
+    flow.async_set_unique_id = AsyncMock()
+    flow._abort_if_unique_id_mismatch = MagicMock()
+    flow.async_show_menu = MagicMock(return_value={"type": "menu"})
+
+    await flow.async_step_reconfigure()
+
+    flow.async_set_unique_id.assert_awaited_once()
+    # Must be called with raise_on_progress=False to tolerate a stale flow.
+    assert flow.async_set_unique_id.await_args.kwargs.get("raise_on_progress") is False
+
+
 # --- _async_finish branching tests (S7) ---
 
 
