@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import secrets
 import time
 from typing import Any
@@ -12,7 +13,10 @@ from urllib.parse import urlencode
 import aiohttp
 import voluptuous as vol
 
+_LOGGER = logging.getLogger(__name__)
+
 from homeassistant.config_entries import (
+    SOURCE_REAUTH,
     SOURCE_RECONFIGURE,
     ConfigEntry,
     ConfigFlow,
@@ -130,11 +134,19 @@ async def _async_validate_refresh_token(
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             if resp.status >= 500:
+                _LOGGER.error("Token validate: server error %s", resp.status)
                 return None, "cannot_connect"
             if resp.status != 200:
+                body = await resp.text()
+                _LOGGER.error(
+                    "Token validate failed: status=%s body=%s",
+                    resp.status,
+                    body[:500],
+                )
                 return None, "invalid_token"
             return await resp.json(), ""
-    except (aiohttp.ClientError, TimeoutError):
+    except (aiohttp.ClientError, TimeoutError) as err:
+        _LOGGER.error("Token validate network error: %s", err)
         return None, "cannot_connect"
 
 
@@ -162,11 +174,19 @@ async def _async_exchange_code(
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             if resp.status >= 500:
+                _LOGGER.error("Code exchange: server error %s", resp.status)
                 return None, "cannot_connect"
             if resp.status != 200:
+                body = await resp.text()
+                _LOGGER.error(
+                    "Code exchange failed: status=%s body=%s",
+                    resp.status,
+                    body[:500],
+                )
                 return None, "invalid_code"
             return await resp.json(), ""
-    except (aiohttp.ClientError, TimeoutError):
+    except (aiohttp.ClientError, TimeoutError) as err:
+        _LOGGER.error("Code exchange network error: %s", err)
         return None, "cannot_connect"
 
 
@@ -178,6 +198,14 @@ def _token_data_to_entry(token_data: dict[str, Any]) -> dict[str, Any] | None:
     access_token = token_data.get("access_token")
     refresh_token = token_data.get("refresh_token")
     if not access_token or not refresh_token:
+        # Log which fields are present (redact values) to diagnose missing tokens
+        _LOGGER.error(
+            "Token response missing required fields: has_access_token=%s, "
+            "has_refresh_token=%s, keys=%s",
+            bool(access_token),
+            bool(refresh_token),
+            list(token_data.keys()),
+        )
         return None
     return {
         CONF_ACCESS_TOKEN: access_token,
@@ -230,6 +258,15 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_mismatch()
         return self.async_show_menu(
             step_id="reconfigure",
+            menu_options=["auth", "manual"],
+        )
+
+    async def async_step_reauth(
+        self, entry_data: dict[str, Any]
+    ) -> ConfigFlowResult:
+        """Handle re-authentication when the refresh token becomes invalid."""
+        return self.async_show_menu(
+            step_id="reauth",
             menu_options=["auth", "manual"],
         )
 
@@ -327,6 +364,11 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
         if self.source == SOURCE_RECONFIGURE:
             return self.async_update_reload_and_abort(
                 self._get_reconfigure_entry(),
+                data=data,
+            )
+        if self.source == SOURCE_REAUTH:
+            return self.async_update_reload_and_abort(
+                self._get_reauth_entry(),
                 data=data,
             )
         return self.async_create_entry(title="Claude Usage", data=data)
