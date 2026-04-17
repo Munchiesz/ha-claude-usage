@@ -124,13 +124,12 @@ async def _async_validate_refresh_token(
     try:
         async with session.post(
             TOKEN_URL,
-            json={
+            data={
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": client_id,
                 "scope": TOKEN_SCOPES,
             },
-            headers={"Content-Type": "application/json"},
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             if resp.status >= 500:
@@ -163,14 +162,13 @@ async def _async_exchange_code(
     try:
         async with session.post(
             TOKEN_URL,
-            json={
+            data={
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": AUTH_REDIRECT_URI,
                 "client_id": client_id,
                 "code_verifier": code_verifier,
             },
-            headers={"Content-Type": "application/json"},
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             if resp.status >= 500:

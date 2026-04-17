@@ -72,18 +72,23 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             async with self.session.post(
                 TOKEN_URL,
-                json={
+                data={
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                     "client_id": client_id,
                     "scope": TOKEN_SCOPES,
                 },
-                headers={"Content-Type": "application/json"},
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 if resp.status == 400:
                     body = await resp.json()
-                    if body.get("error") == "invalid_grant":
+                    error = body.get("error", "")
+                    # Anthropic may return {"error": "invalid_grant"} or
+                    # {"error": {"type": "...", "message": "..."}}.
+                    error_type = (
+                        error.get("type", "") if isinstance(error, dict) else error
+                    )
+                    if error_type in ("invalid_grant", "invalid_request_error"):
                         raise ConfigEntryAuthFailed(
                             "Refresh token is invalid. Re-authenticate the integration."
                         )
