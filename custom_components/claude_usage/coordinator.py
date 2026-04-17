@@ -72,12 +72,13 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             async with self.session.post(
                 TOKEN_URL,
-                data={
+                json={
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                     "client_id": client_id,
                     "scope": TOKEN_SCOPES,
                 },
+                headers={"Content-Type": "application/json"},
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 if resp.status == 400:

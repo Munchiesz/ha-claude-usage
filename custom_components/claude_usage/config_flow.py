@@ -124,12 +124,13 @@ async def _async_validate_refresh_token(
     try:
         async with session.post(
             TOKEN_URL,
-            data={
+            json={
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
                 "client_id": client_id,
                 "scope": TOKEN_SCOPES,
             },
+            headers={"Content-Type": "application/json"},
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             if resp.status >= 500:
@@ -153,6 +154,7 @@ async def _async_exchange_code(
     session: aiohttp.ClientSession,
     code: str,
     code_verifier: str,
+    state: str,
     client_id: str = CLIENT_ID,
 ) -> tuple[dict[str, Any] | None, str]:
     """Exchange an authorization code for tokens.
@@ -162,13 +164,15 @@ async def _async_exchange_code(
     try:
         async with session.post(
             TOKEN_URL,
-            data={
+            json={
                 "grant_type": "authorization_code",
                 "code": code,
+                "state": state,
                 "redirect_uri": AUTH_REDIRECT_URI,
                 "client_id": client_id,
                 "code_verifier": code_verifier,
             },
+            headers={"Content-Type": "application/json"},
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             if resp.status >= 500:
@@ -295,7 +299,7 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 session = async_get_clientsession(self.hass)
                 token_data, error_key = await _async_exchange_code(
-                    session, code, self._code_verifier
+                    session, code, self._code_verifier, pasted_state
                 )
                 if token_data is None:
                     errors["base"] = error_key

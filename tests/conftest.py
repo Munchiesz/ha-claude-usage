@@ -133,6 +133,7 @@ _stub_module("homeassistant.config_entries", {
     "ConfigFlow": _ConfigFlow,
     "ConfigFlowResult": _ConfigFlowResult,
     "OptionsFlow": _OptionsFlow,
+    "SOURCE_REAUTH": "reauth",
     "SOURCE_RECONFIGURE": "reconfigure",
 })
 _stub_module("homeassistant.helpers")
@@ -238,6 +239,7 @@ def create_mock_response(
     resp.status = status
     resp.headers = headers or {}
     resp.json = AsyncMock(return_value=json_data or {})
+    resp.text = AsyncMock(return_value=str(json_data or {}))
     resp.raise_for_status = MagicMock()
     if status >= 400:
         from aiohttp import ClientResponseError

@@ -233,7 +233,7 @@ async def test_exchange_code_success() -> None:
     session = MagicMock()
     session.post = MagicMock(return_value=create_mock_response(200, MOCK_CODE_RESPONSE))
 
-    data, err = await _async_exchange_code(session, "code", "verifier")
+    data, err = await _async_exchange_code(session, "code", "verifier", "test-state")
 
     assert data == MOCK_CODE_RESPONSE
     assert err == ""
@@ -242,9 +242,9 @@ async def test_exchange_code_success() -> None:
     assert body["code"] == "code"
     assert body["code_verifier"] == "verifier"
     assert body["redirect_uri"] == AUTH_REDIRECT_URI
-    # `state` is an authorize-endpoint param only (RFC 6749 §4.1.3); must NOT
-    # be included in the token exchange body.
-    assert "state" not in body
+    # Anthropic's token endpoint requires `state` in the exchange body
+    # (non-standard but enforced since mid-2025).
+    assert body["state"] == "test-state"
 
 
 @pytest.mark.asyncio
@@ -252,7 +252,7 @@ async def test_exchange_code_invalid() -> None:
     session = MagicMock()
     session.post = MagicMock(return_value=create_mock_response(400))
 
-    data, err = await _async_exchange_code(session, "bad", "v")
+    data, err = await _async_exchange_code(session, "bad", "v", "s")
 
     assert data is None
     assert err == "invalid_code"
@@ -263,7 +263,7 @@ async def test_exchange_code_server_error() -> None:
     session = MagicMock()
     session.post = MagicMock(return_value=create_mock_response(503))
 
-    data, err = await _async_exchange_code(session, "code", "v")
+    data, err = await _async_exchange_code(session, "code", "v", "s")
 
     assert data is None
     assert err == "cannot_connect"
@@ -278,7 +278,7 @@ async def test_exchange_code_network_error() -> None:
     resp.__aenter__ = AsyncMock(side_effect=aiohttp.ClientError("boom"))
     session.post = MagicMock(return_value=resp)
 
-    data, err = await _async_exchange_code(session, "code", "v")
+    data, err = await _async_exchange_code(session, "code", "v", "s")
 
     assert data is None
     assert err == "cannot_connect"
