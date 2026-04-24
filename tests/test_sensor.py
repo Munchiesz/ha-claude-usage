@@ -186,3 +186,191 @@ def test_session_utilization_extra_attrs() -> None:
     assert "resets_at" in attrs
     assert "minutes_until_reset" in attrs
     assert attrs["resets_at"] == "2026-04-11T18:00:00Z"
+
+
+# --- Translation keys (L6) ---
+
+
+def test_all_descriptions_have_translation_keys() -> None:
+    """All sensor descriptions must set translation_key for localization."""
+    for desc in (*SENSOR_DESCRIPTIONS, *EXTRA_USAGE_DESCRIPTIONS):
+        assert desc.translation_key == desc.key, (
+            f"{desc.key} should have translation_key matching its key"
+        )
+
+
+# --- ClaudeUsageSensor entity tests ---
+
+
+def test_sensor_init_sets_unique_id_and_device_info() -> None:
+    """Sensor must build a unique_id scoped to the config entry + key, and
+    declare the device as a SERVICE entry type (not a physical device)."""
+    from unittest.mock import MagicMock
+
+    from homeassistant.helpers.device_registry import DeviceEntryType
+
+    from custom_components.claude_usage.sensor import ClaudeUsageSensor
+
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "entry-123"
+
+    desc = SENSOR_DESCRIPTIONS[0]
+    sensor = ClaudeUsageSensor(coordinator, desc)
+
+    assert sensor._attr_unique_id == "entry-123_session_utilization"
+    assert sensor._attr_device_info.identifiers == {
+        ("claude_usage", "entry-123")
+    }
+    assert sensor._attr_device_info.manufacturer == "Anthropic"
+    assert sensor._attr_device_info.entry_type == DeviceEntryType.SERVICE
+
+
+def test_sensor_native_value_returns_none_when_no_data() -> None:
+    """Sensor must return None from native_value when coordinator has no data yet."""
+    from unittest.mock import MagicMock
+
+    from custom_components.claude_usage.sensor import ClaudeUsageSensor
+
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "e"
+    coordinator.data = None
+
+    sensor = ClaudeUsageSensor(coordinator, SENSOR_DESCRIPTIONS[0])
+
+    assert sensor.native_value is None
+
+
+def test_sensor_native_value_returns_data() -> None:
+    """Sensor native_value must forward the value_fn result on live data."""
+    from unittest.mock import MagicMock
+
+    from custom_components.claude_usage.sensor import ClaudeUsageSensor
+
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "e"
+    coordinator.data = MOCK_USAGE_RESPONSE
+
+    sensor = ClaudeUsageSensor(coordinator, SENSOR_DESCRIPTIONS[0])
+
+    assert sensor.native_value == 44.0
+
+
+def test_sensor_extra_state_attributes_returns_none_when_no_data() -> None:
+    """Sensor attributes must be None when coordinator has no data yet."""
+    from unittest.mock import MagicMock
+
+    from custom_components.claude_usage.sensor import ClaudeUsageSensor
+
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "e"
+    coordinator.data = None
+
+    sensor = ClaudeUsageSensor(coordinator, SENSOR_DESCRIPTIONS[0])
+
+    assert sensor.extra_state_attributes is None
+
+
+def test_sensor_extra_state_attributes_includes_resets_at() -> None:
+    """Sensor attributes must include the computed minutes_until_reset."""
+    from unittest.mock import MagicMock
+
+    from custom_components.claude_usage.sensor import ClaudeUsageSensor
+
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "e"
+    coordinator.data = MOCK_USAGE_RESPONSE
+
+    sensor = ClaudeUsageSensor(coordinator, SENSOR_DESCRIPTIONS[0])
+    attrs = sensor.extra_state_attributes
+
+    assert attrs is not None
+    assert "resets_at" in attrs
+    assert "minutes_until_reset" in attrs
+
+
+# --- async_setup_entry platform setup ---
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_adds_extra_sensors_when_enabled() -> None:
+    """The platform must add the 2 extra-usage sensors when is_enabled is True."""
+    from unittest.mock import MagicMock
+
+    from custom_components.claude_usage.sensor import async_setup_entry
+
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "e"
+    coordinator.data = MOCK_USAGE_RESPONSE  # has extra_usage.is_enabled = True
+
+    entry = MagicMock()
+    entry.runtime_data = coordinator
+
+    added: list = []
+
+    def _capture_entities(gen):
+        added.extend(gen)
+
+    await async_setup_entry(MagicMock(), entry, _capture_entities)
+
+    # 4 base + 2 extra = 6 sensors
+    assert len(added) == 6
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_skips_extra_sensors_when_disabled() -> None:
+    """The platform must skip extra-usage sensors when is_enabled is False."""
+    from unittest.mock import MagicMock
+
+    from custom_components.claude_usage.sensor import async_setup_entry
+
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "e"
+    coordinator.data = {
+        **MOCK_USAGE_RESPONSE,
+        "extra_usage": {"is_enabled": False},
+    }
+
+    entry = MagicMock()
+    entry.runtime_data = coordinator
+
+    added: list = []
+
+    def _capture_entities(gen):
+        added.extend(gen)
+
+    await async_setup_entry(MagicMock(), entry, _capture_entities)
+
+    assert len(added) == 4  # just the base sensors
+
+
+@pytest.mark.asyncio
+async def test_async_setup_entry_handles_missing_data() -> None:
+    """The platform must not crash when coordinator.data is None."""
+    from unittest.mock import MagicMock
+
+    from custom_components.claude_usage.sensor import async_setup_entry
+
+    coordinator = MagicMock()
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.entry_id = "e"
+    coordinator.data = None
+
+    entry = MagicMock()
+    entry.runtime_data = coordinator
+
+    added: list = []
+
+    def _capture_entities(gen):
+        added.extend(gen)
+
+    await async_setup_entry(MagicMock(), entry, _capture_entities)
+
+    # With no data, only the base sensors are added; no crash on None.get().
+    assert len(added) == 4

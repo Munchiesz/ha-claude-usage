@@ -110,6 +110,10 @@ class _DeviceInfo:
             setattr(self, k, v)
 
 
+class _DeviceEntryType:
+    SERVICE = "service"
+
+
 class _Platform:
     SENSOR = "sensor"
 
@@ -147,6 +151,7 @@ _stub_module("homeassistant.helpers.update_coordinator", {
 })
 _stub_module("homeassistant.helpers.device_registry", {
     "DeviceInfo": _DeviceInfo,
+    "DeviceEntryType": _DeviceEntryType,
 })
 _stub_module("homeassistant.helpers.entity_platform", {
     "AddConfigEntryEntitiesCallback": MagicMock,
@@ -163,6 +168,23 @@ _stub_module("homeassistant.components.sensor", {
     "SensorEntity": _SensorEntity,
     "SensorEntityDescription": _SensorEntityDescription,
     "SensorStateClass": _SensorStateClass,
+})
+
+
+def _async_redact_data(data: Any, to_redact: Any) -> Any:
+    """Minimal async_redact_data replacement for tests."""
+    if isinstance(data, dict):
+        return {
+            k: ("**REDACTED**" if k in to_redact else _async_redact_data(v, to_redact))
+            for k, v in data.items()
+        }
+    if isinstance(data, list):
+        return [_async_redact_data(item, to_redact) for item in data]
+    return data
+
+
+_stub_module("homeassistant.components.diagnostics", {
+    "async_redact_data": _async_redact_data,
 })
 
 # --- Now import integration code ---

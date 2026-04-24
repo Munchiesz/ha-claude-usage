@@ -66,5 +66,27 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "session_utilization": {
+        "name": "Session utilization"
+      },
+      "session_resets_at": {
+        "name": "Session resets at"
+      },
+      "weekly_utilization": {
+        "name": "Weekly utilization"
+      },
+      "weekly_resets_at": {
+        "name": "Weekly resets at"
+      },
+      "extra_credits_used": {
+        "name": "Extra credits used"
+      },
+      "extra_utilization": {
+        "name": "Extra usage utilization"
+      }
+    }
   }
 }

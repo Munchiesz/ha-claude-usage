@@ -14,7 +14,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -50,12 +50,13 @@ class ClaudeUsageSensorDescription(SensorEntityDescription):
     """Describe a Claude Usage sensor."""
 
     value_fn: Callable[[dict[str, Any]], StateType]
-    extra_attrs_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    extra_attrs_fn: Callable[[dict[str, Any]], dict[str, Any]]
 
 
 SENSOR_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ClaudeUsageSensorDescription(
         key="session_utilization",
+        translation_key="session_utilization",
         name="Session Utilization",
         native_unit_of_measurement="%",
         state_class=SensorStateClass.MEASUREMENT,
@@ -71,6 +72,7 @@ SENSOR_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ),
     ClaudeUsageSensorDescription(
         key="session_resets_at",
+        translation_key="session_resets_at",
         name="Session Resets At",
         icon="mdi:timer-sand",
         device_class=SensorDeviceClass.TIMESTAMP,
@@ -83,6 +85,7 @@ SENSOR_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ),
     ClaudeUsageSensorDescription(
         key="weekly_utilization",
+        translation_key="weekly_utilization",
         name="Weekly Utilization",
         native_unit_of_measurement="%",
         state_class=SensorStateClass.MEASUREMENT,
@@ -98,6 +101,7 @@ SENSOR_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ),
     ClaudeUsageSensorDescription(
         key="weekly_resets_at",
+        translation_key="weekly_resets_at",
         name="Weekly Resets At",
         icon="mdi:calendar-clock",
         device_class=SensorDeviceClass.TIMESTAMP,
@@ -113,6 +117,7 @@ SENSOR_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
 EXTRA_USAGE_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ClaudeUsageSensorDescription(
         key="extra_credits_used",
+        translation_key="extra_credits_used",
         name="Extra Credits Used",
         native_unit_of_measurement="credits",
         state_class=SensorStateClass.TOTAL,
@@ -125,6 +130,7 @@ EXTRA_USAGE_DESCRIPTIONS: tuple[ClaudeUsageSensorDescription, ...] = (
     ),
     ClaudeUsageSensorDescription(
         key="extra_utilization",
+        translation_key="extra_utilization",
         name="Extra Usage Utilization",
         native_unit_of_measurement="%",
         state_class=SensorStateClass.MEASUREMENT,
@@ -150,7 +156,7 @@ async def async_setup_entry(
     descriptions: list[ClaudeUsageSensorDescription] = list(SENSOR_DESCRIPTIONS)
 
     # Conditionally add extra usage sensors
-    extra = coordinator.data.get("extra_usage")
+    extra = coordinator.data.get("extra_usage") if coordinator.data else None
     if extra and extra.get("is_enabled"):
         descriptions.extend(EXTRA_USAGE_DESCRIPTIONS)
 
@@ -181,7 +187,9 @@ class ClaudeUsageSensor(CoordinatorEntity[ClaudeUsageCoordinator], SensorEntity)
             identifiers={(DOMAIN, coordinator.config_entry.entry_id)},
             name="Claude Subscription",
             manufacturer="Anthropic",
-            model="Claude Max",
+            # SERVICE hides the device from the "physical devices" dashboard
+            # where a cloud subscription doesn't belong.
+            entry_type=DeviceEntryType.SERVICE,
         )
 
     @property
@@ -194,9 +202,6 @@ class ClaudeUsageSensor(CoordinatorEntity[ClaudeUsageCoordinator], SensorEntity)
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return extra state attributes."""
-        if (
-            self.coordinator.data is None
-            or self.entity_description.extra_attrs_fn is None
-        ):
+        if self.coordinator.data is None:
             return None
         return self.entity_description.extra_attrs_fn(self.coordinator.data)

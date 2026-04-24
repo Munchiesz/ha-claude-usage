@@ -26,7 +26,9 @@ from .const import (
     CONF_REFRESH_TOKEN,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_TOKEN_LIFETIME_SECS,
     DOMAIN,
+    MAX_SCAN_INTERVAL,
     TOKEN_REFRESH_BUFFER_SECS,
     TOKEN_SCOPES,
     TOKEN_URL,
@@ -34,6 +36,11 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Hard cap on backoff interval during rate-limiting or API outages. Without
+# this, a hostile or misconfigured server returning a huge Retry-After value
+# could suspend polling for hours.
+_MAX_BACKOFF_SECS = MAX_SCAN_INTERVAL * 2  # 1 hour
 
 type ClaudeUsageConfigEntry = ConfigEntry[ClaudeUsageCoordinator]
 
@@ -64,6 +71,17 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=self._default_interval,
         )
 
+    def set_default_interval(self, interval: timedelta) -> None:
+        """Update the baseline poll interval and reset any backoff."""
+        self._default_interval = interval
+        self.update_interval = interval
+
+    def _bump_interval_for_backoff(self, seconds: int) -> None:
+        """Set update_interval for a backoff, clamped to [default, MAX_BACKOFF]."""
+        default_secs = int(self._default_interval.total_seconds())
+        clamped = max(default_secs, min(seconds, _MAX_BACKOFF_SECS))
+        self.update_interval = timedelta(seconds=clamped)
+
     async def _async_refresh_token(self) -> str:
         """Refresh the OAuth token and persist the new tokens."""
         refresh_token = self.config_entry.data[CONF_REFRESH_TOKEN]
@@ -82,7 +100,16 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 if resp.status == 400:
-                    body = await resp.json()
+                    try:
+                        body = await resp.json()
+                    except (aiohttp.ContentTypeError, ValueError):
+                        # Non-JSON 400 (proxy HTML page, empty body). A 400
+                        # from the OAuth token endpoint is almost always an
+                        # auth failure — trigger reauth rather than masking it
+                        # as a generic UpdateFailed that never surfaces.
+                        raise ConfigEntryAuthFailed(
+                            "Token endpoint returned non-JSON 400. Re-authenticate."
+                        ) from None
                     error = body.get("error", "")
                     # Anthropic may return {"error": "invalid_grant"} or
                     # {"error": {"type": "...", "message": "..."}}.
@@ -93,9 +120,18 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         raise ConfigEntryAuthFailed(
                             "Refresh token is invalid. Re-authenticate the integration."
                         )
+                if 500 <= resp.status < 600:
+                    self._bump_interval_for_backoff(
+                        int(self._default_interval.total_seconds()) * 2
+                    )
+                    raise UpdateFailed(
+                        f"Token endpoint server error {resp.status}"
+                    )
                 resp.raise_for_status()
                 data = await resp.json()
         except ConfigEntryAuthFailed:
+            raise
+        except UpdateFailed:
             raise
         except (aiohttp.ClientError, TimeoutError) as err:
             raise UpdateFailed(f"Token refresh failed: {err}") from err
@@ -104,7 +140,9 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not new_access:
             raise UpdateFailed("Token refresh returned no access_token")
         new_refresh = data.get("refresh_token", refresh_token)
-        expires_at = time.time() + data.get("expires_in", 28800)
+        expires_at = time.time() + data.get(
+            "expires_in", DEFAULT_TOKEN_LIFETIME_SECS
+        )
 
         self.hass.config_entries.async_update_entry(
             self.config_entry,
@@ -145,17 +183,27 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if retry_after:
                     try:
                         delay = int(retry_after)
-                        self.update_interval = timedelta(
-                            seconds=max(delay, int(self._default_interval.total_seconds()))
-                        )
+                        self._bump_interval_for_backoff(delay)
                         msg += f" (retry after {retry_after}s)"
                     except ValueError:
-                        self.update_interval = self._default_interval * 2
+                        self._bump_interval_for_backoff(
+                            int(self._default_interval.total_seconds()) * 2
+                        )
                         msg += f" (retry after {retry_after})"
                 else:
-                    self.update_interval = self._default_interval * 2
+                    self._bump_interval_for_backoff(
+                        int(self._default_interval.total_seconds()) * 2
+                    )
                 _LOGGER.warning(msg)
                 raise UpdateFailed(msg)
+            if 500 <= resp.status < 600:
+                # Bump the poll interval so we don't hammer the API during
+                # a Claude outage. Reset on the next successful poll.
+                self._bump_interval_for_backoff(
+                    int(self._default_interval.total_seconds()) * 2
+                )
+                _LOGGER.warning("Claude API server error %s", resp.status)
+                raise UpdateFailed(f"Claude API server error {resp.status}")
             resp.raise_for_status()
             return await resp.json()
 
@@ -174,12 +222,14 @@ class ClaudeUsageCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 data = await self._async_fetch_usage(token)
                 self.update_interval = self._default_interval
                 return data
-            except _TokenExpiredError:
+            except _TokenExpiredError as retry_err:
                 raise ConfigEntryAuthFailed(
                     "API returned 401 after token refresh"
-                )
+                ) from retry_err
 
         except ConfigEntryAuthFailed:
+            raise
+        except UpdateFailed:
             raise
         except (aiohttp.ClientError, TimeoutError) as err:
             raise UpdateFailed(f"Error fetching usage data: {err}") from err

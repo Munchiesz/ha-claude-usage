@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlparse
 
@@ -448,3 +449,247 @@ async def test_finish_updates_entry_on_reconfigure() -> None:
     assert result == "UPDATED"
     flow.async_update_reload_and_abort.assert_called_once()
     flow.async_create_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_finish_updates_entry_on_reauth() -> None:
+    """Reauth finish must update the existing entry, not create a new one."""
+    from custom_components.claude_usage.config_flow import ClaudeUsageConfigFlow
+
+    flow = ClaudeUsageConfigFlow()
+    flow.source = "reauth"
+    flow.async_create_entry = MagicMock(return_value="CREATED")
+    flow.async_update_reload_and_abort = MagicMock(return_value="UPDATED")
+    flow._get_reauth_entry = MagicMock(return_value="ENTRY")
+
+    result = await flow._async_finish({CONF_ACCESS_TOKEN: "a"})
+
+    assert result == "UPDATED"
+    flow.async_update_reload_and_abort.assert_called_once()
+    flow.async_create_entry.assert_not_called()
+    flow._get_reauth_entry.assert_called_once()
+
+
+# --- async_step_reauth tests (H1) ---
+
+
+@pytest.mark.asyncio
+async def test_reauth_sets_unique_id_tolerating_in_progress_flow() -> None:
+    """Reauth must set the unique ID with raise_on_progress=False.
+
+    Without this, a stale reauth flow (e.g. user dismissed the dialog after
+    an expired-code error) would cause the next reauth trigger to abort with
+    already_in_progress, locking the user out.
+    """
+    from custom_components.claude_usage.config_flow import ClaudeUsageConfigFlow
+
+    flow = ClaudeUsageConfigFlow()
+    flow.async_set_unique_id = AsyncMock()
+    flow.async_show_menu = MagicMock(return_value={"type": "menu"})
+
+    await flow.async_step_reauth({"some_entry_data": "ignored"})
+
+    flow.async_set_unique_id.assert_awaited_once()
+    assert (
+        flow.async_set_unique_id.await_args.kwargs.get("raise_on_progress")
+        is False
+    )
+    flow.async_show_menu.assert_called_once()
+    assert flow.async_show_menu.call_args.kwargs["step_id"] == "reauth"
+
+
+# --- async_step_manual tests (H2) ---
+
+
+@pytest.mark.asyncio
+async def test_manual_flow_shows_form_when_no_input() -> None:
+    """Initial manual step with no input shows the paste-token form."""
+    from custom_components.claude_usage.config_flow import ClaudeUsageConfigFlow
+
+    flow = ClaudeUsageConfigFlow()
+    flow.hass = MagicMock()
+    flow.async_show_form = MagicMock(
+        side_effect=lambda **kwargs: {"type": "form", **kwargs}
+    )
+
+    result = await flow.async_step_manual()
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "manual"
+    assert result["errors"] == {}
+
+
+@pytest.mark.asyncio
+async def test_manual_flow_success_uses_token_data_to_entry(monkeypatch) -> None:
+    """Successful manual validation must route through _token_data_to_entry.
+
+    Previously the manual flow silently kept the user's pasted refresh token
+    if the response didn't include one, bypassing the validation the OAuth
+    path uses. Both paths should now share the same validator.
+    """
+    from custom_components.claude_usage import config_flow as cf
+
+    flow = cf.ClaudeUsageConfigFlow()
+    flow.hass = MagicMock()
+    flow.source = "user"
+    flow.async_create_entry = MagicMock(
+        side_effect=lambda **kwargs: {"type": "create", **kwargs}
+    )
+
+    async def _ok_validate(*_a, **_kw):
+        return {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_in": 3600,
+        }, ""
+
+    monkeypatch.setattr(cf, "_async_validate_refresh_token", _ok_validate)
+    monkeypatch.setattr(
+        cf, "async_get_clientsession", lambda _hass: MagicMock()
+    )
+
+    result = await flow.async_step_manual(
+        {CONF_REFRESH_TOKEN: "user-pasted-token"}
+    )
+
+    assert result["type"] == "create"
+    data = result["data"]
+    # Server-returned tokens take precedence — the user's pasted token is
+    # NOT retained as a fallback anymore (it could have been rotated server-side).
+    assert data[CONF_ACCESS_TOKEN] == "new-access"
+    assert data[CONF_REFRESH_TOKEN] == "new-refresh"
+
+
+@pytest.mark.asyncio
+async def test_manual_flow_rejects_response_missing_refresh_token(
+    monkeypatch,
+) -> None:
+    """If the token endpoint omits refresh_token, the flow must fail cleanly.
+
+    This is H2 from the audit: the old code silently kept the user's pasted
+    token, which could leave them with a just-rotated (now-invalid) token
+    and a confused support report.
+    """
+    from custom_components.claude_usage import config_flow as cf
+
+    flow = cf.ClaudeUsageConfigFlow()
+    flow.hass = MagicMock()
+    flow.async_show_form = MagicMock(
+        side_effect=lambda **kwargs: {"type": "form", **kwargs}
+    )
+
+    async def _partial_response(*_a, **_kw):
+        # access_token only — simulates a misbehaving endpoint.
+        return {"access_token": "only-access", "expires_in": 3600}, ""
+
+    monkeypatch.setattr(cf, "_async_validate_refresh_token", _partial_response)
+    monkeypatch.setattr(
+        cf, "async_get_clientsession", lambda _hass: MagicMock()
+    )
+
+    result = await flow.async_step_manual(
+        {CONF_REFRESH_TOKEN: "user-token"}
+    )
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "invalid_token"}
+
+
+@pytest.mark.asyncio
+async def test_manual_flow_stores_custom_client_id(monkeypatch) -> None:
+    """A user-supplied custom client_id must be persisted on the entry."""
+    from custom_components.claude_usage import config_flow as cf
+    from custom_components.claude_usage.const import CONF_CLIENT_ID
+
+    flow = cf.ClaudeUsageConfigFlow()
+    flow.hass = MagicMock()
+    flow.source = "user"
+    flow.async_create_entry = MagicMock(
+        side_effect=lambda **kwargs: {"type": "create", **kwargs}
+    )
+
+    async def _ok_validate(*_a, **_kw):
+        return {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "expires_in": 3600,
+        }, ""
+
+    monkeypatch.setattr(cf, "_async_validate_refresh_token", _ok_validate)
+    monkeypatch.setattr(
+        cf, "async_get_clientsession", lambda _hass: MagicMock()
+    )
+
+    result = await flow.async_step_manual(
+        {
+            CONF_REFRESH_TOKEN: "user-token",
+            CONF_CLIENT_ID: "my-custom-client",
+        }
+    )
+
+    assert result["data"][CONF_CLIENT_ID] == "my-custom-client"
+
+
+@pytest.mark.asyncio
+async def test_manual_flow_propagates_validation_error(monkeypatch) -> None:
+    """A validation error key must surface directly as the form error."""
+    from custom_components.claude_usage import config_flow as cf
+
+    flow = cf.ClaudeUsageConfigFlow()
+    flow.hass = MagicMock()
+    flow.async_show_form = MagicMock(
+        side_effect=lambda **kwargs: {"type": "form", **kwargs}
+    )
+
+    async def _fail(*_a, **_kw):
+        return None, "cannot_connect"
+
+    monkeypatch.setattr(cf, "_async_validate_refresh_token", _fail)
+    monkeypatch.setattr(
+        cf, "async_get_clientsession", lambda _hass: MagicMock()
+    )
+
+    result = await flow.async_step_manual(
+        {CONF_REFRESH_TOKEN: "user-token"}
+    )
+
+    assert result["errors"] == {"base": "cannot_connect"}
+
+
+# --- async_step_auth state forwarding (M4) ---
+
+
+@pytest.mark.asyncio
+async def test_auth_step_forwards_self_state_not_pasted_state(monkeypatch) -> None:
+    """After state validation passes, the exchange must send the server-known state.
+
+    M4: previously the code forwarded the user-pasted state. At this point the
+    two are equal, but sending the server-side value makes the trust boundary
+    explicit and keeps reviewer cognitive load low.
+    """
+    from custom_components.claude_usage import config_flow as cf
+
+    flow = cf.ClaudeUsageConfigFlow()
+    flow.hass = MagicMock()
+    flow.source = "user"
+    flow.async_create_entry = MagicMock(
+        side_effect=lambda **kwargs: {"type": "create", **kwargs}
+    )
+    flow._code_verifier = "v" * 64
+    flow._state = "server-side-state"
+
+    forwarded_state: dict[str, Any] = {}
+
+    async def _capture_exchange(session, code, verifier, state, *_, **__):
+        forwarded_state["value"] = state
+        return MOCK_CODE_RESPONSE, ""
+
+    monkeypatch.setattr(cf, "_async_exchange_code", _capture_exchange)
+    monkeypatch.setattr(
+        cf, "async_get_clientsession", lambda _hass: MagicMock()
+    )
+
+    # Pasted state matches server state (otherwise validation rejects).
+    await flow.async_step_auth({"code": "code#server-side-state"})
+
+    assert forwarded_state["value"] == "server-side-state"

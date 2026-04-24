@@ -17,6 +17,14 @@
           "manual": "Paste a new refresh token manually"
         }
       },
+      "reauth": {
+        "title": "Re-authenticate Claude Usage",
+        "description": "Your Claude credentials have expired. Please re-authenticate.",
+        "menu_options": {
+          "auth": "Log in with Claude (recommended)",
+          "manual": "Paste a new refresh token manually"
+        }
+      },
       "auth": {
         "title": "Log in with Claude",
         "description": "1. **[Open the Claude login page]({auth_url})** in a new tab.\n2. Approve the request \u2014 Claude will redirect you to a page with an authorization code.\n3. Copy the code from that page (it looks like `abc123#xyz789`) and paste it below.",
@@ -56,6 +64,28 @@
         "data": {
           "scan_interval": "Update interval (seconds)"
         }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "session_utilization": {
+        "name": "Session utilization"
+      },
+      "session_resets_at": {
+        "name": "Session resets at"
+      },
+      "weekly_utilization": {
+        "name": "Weekly utilization"
+      },
+      "weekly_resets_at": {
+        "name": "Weekly resets at"
+      },
+      "extra_credits_used": {
+        "name": "Extra credits used"
+      },
+      "extra_utilization": {
+        "name": "Extra usage utilization"
       }
     }
   }

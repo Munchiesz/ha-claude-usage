@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -295,3 +295,134 @@ async def test_update_data_double_401_raises_auth_failed(
 
     with pytest.raises(ConfigEntryAuthFailed):
         await coordinator._async_update_data()
+
+
+# --- H4: 400 with non-JSON body triggers ConfigEntryAuthFailed ---
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_400_non_json_body_triggers_reauth(
+    mock_hass: MagicMock, mock_config_entry: MagicMock
+) -> None:
+    """H4: a 400 with a non-JSON body must surface as ConfigEntryAuthFailed.
+
+    Previously `resp.json()` would raise ContentTypeError, which bubbled up
+    into the outer ClientError handler and was wrapped as UpdateFailed. That
+    masked the reauth signal — the user never saw the re-authenticate prompt.
+    """
+    import aiohttp
+
+    coordinator = _make_coordinator(mock_hass, mock_config_entry)
+    resp = create_mock_response(400)
+    resp.json = AsyncMock(
+        side_effect=aiohttp.ContentTypeError(
+            request_info=MagicMock(),
+            history=(),
+            message="not json",
+        )
+    )
+    coordinator.session.post = MagicMock(return_value=resp)
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coordinator._async_refresh_token()
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_400_invalid_request_error_triggers_reauth(
+    mock_hass: MagicMock, mock_config_entry: MagicMock
+) -> None:
+    """Test invalid_request_error (nested under error.type) triggers reauth."""
+    coordinator = _make_coordinator(mock_hass, mock_config_entry)
+    body = {"error": {"type": "invalid_request_error", "message": "bad"}}
+    resp = create_mock_response(400, body)
+    coordinator.session.post = MagicMock(return_value=resp)
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coordinator._async_refresh_token()
+
+
+# --- H5: 429 backoff is capped ---
+
+
+@pytest.mark.asyncio
+async def test_429_huge_retry_after_is_capped(
+    mock_hass: MagicMock, mock_config_entry: MagicMock
+) -> None:
+    """H5: a hostile/misconfigured server returning a huge Retry-After must not
+    suspend polling for hours. The interval is capped at MAX_SCAN_INTERVAL * 2.
+    """
+    from custom_components.claude_usage.coordinator import _MAX_BACKOFF_SECS
+
+    coordinator = _make_coordinator(mock_hass, mock_config_entry)
+    coordinator.session.get = MagicMock(
+        return_value=create_mock_response(
+            429, headers={"Retry-After": "86400"}  # 24 hours
+        )
+    )
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_fetch_usage("test-token")
+
+    assert coordinator.update_interval == timedelta(seconds=_MAX_BACKOFF_SECS)
+
+
+# --- M5: 5xx backoff ---
+
+
+@pytest.mark.asyncio
+async def test_fetch_usage_503_bumps_interval_and_raises_update_failed(
+    mock_hass: MagicMock, mock_config_entry: MagicMock
+) -> None:
+    """M5: a 5xx response should bump the poll interval and raise UpdateFailed.
+
+    Without this, a multi-hour Claude outage would mean hammering the API
+    at the default poll rate for the entire duration of the outage.
+    """
+    coordinator = _make_coordinator(mock_hass, mock_config_entry)
+    default = coordinator._default_interval
+    coordinator.session.get = MagicMock(
+        return_value=create_mock_response(503)
+    )
+
+    with pytest.raises(UpdateFailed, match="server error 503"):
+        await coordinator._async_fetch_usage("test-token")
+
+    assert coordinator.update_interval == default * 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_503_bumps_interval(
+    mock_hass: MagicMock, mock_config_entry: MagicMock
+) -> None:
+    """5xx on the token endpoint should also bump the backoff interval."""
+    coordinator = _make_coordinator(mock_hass, mock_config_entry)
+    default = coordinator._default_interval
+    coordinator.session.post = MagicMock(
+        return_value=create_mock_response(503)
+    )
+
+    with pytest.raises(UpdateFailed, match="server error 503"):
+        await coordinator._async_refresh_token()
+
+    assert coordinator.update_interval == default * 2
+
+
+# --- M1: set_default_interval public API ---
+
+
+@pytest.mark.asyncio
+async def test_set_default_interval_updates_both_baseline_and_current(
+    mock_hass: MagicMock, mock_config_entry: MagicMock
+) -> None:
+    """set_default_interval must update both baseline and current interval.
+
+    Replaces the old pattern of poking `coordinator._default_interval` and
+    `coordinator.update_interval` directly from __init__._async_update_listener.
+    """
+    coordinator = _make_coordinator(mock_hass, mock_config_entry)
+    new_interval = timedelta(seconds=600)
+
+    coordinator.set_default_interval(new_interval)
+
+    assert coordinator._default_interval == new_interval
+    assert coordinator.update_interval == new_interval

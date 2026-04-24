@@ -13,8 +13,6 @@ from urllib.parse import urlencode
 import aiohttp
 import voluptuous as vol
 
-_LOGGER = logging.getLogger(__name__)
-
 from homeassistant.config_entries import (
     SOURCE_REAUTH,
     SOURCE_RECONFIGURE,
@@ -45,6 +43,8 @@ from .const import (
     TOKEN_SCOPES,
     TOKEN_URL,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 MANUAL_SCHEMA = vol.Schema(
     {
@@ -200,7 +200,7 @@ def _token_data_to_entry(token_data: dict[str, Any]) -> dict[str, Any] | None:
     access_token = token_data.get("access_token")
     refresh_token = token_data.get("refresh_token")
     if not access_token or not refresh_token:
-        # Log which fields are present (redact values) to diagnose missing tokens
+        # NB: only log booleans and key names, never raw token values.
         _LOGGER.error(
             "Token response missing required fields: has_access_token=%s, "
             "has_refresh_token=%s, keys=%s",
@@ -267,6 +267,10 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
         self, entry_data: dict[str, Any]
     ) -> ConfigFlowResult:
         """Handle re-authentication when the refresh token becomes invalid."""
+        # Set the unique ID so the reauth flow round-trips consistently with
+        # user/reconfigure (prevents duplicate entries in edge cases) and
+        # tolerate a stale in-progress flow for the same reason as reconfigure.
+        await self.async_set_unique_id(DOMAIN, raise_on_progress=False)
         return self.async_show_menu(
             step_id="reauth",
             menu_options=["auth", "manual"],
@@ -292,14 +296,22 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
             # Require the pasted input to carry state and match what we issued.
             # PKCE covers code-injection but state binds this callback to this
             # flow instance (CSRF); don't let a bare-code paste skip it.
-            if pasted_state is None or pasted_state != self._state:
+            # Use compare_digest for constant-time comparison (defensive —
+            # state isn't a secret the attacker can probe via timing, but it
+            # is the idiomatic way to compare security tokens).
+            if pasted_state is None or not secrets.compare_digest(
+                pasted_state, self._state
+            ):
                 errors["base"] = "invalid_state"
             elif not code:
                 errors["base"] = "invalid_code"
             else:
                 session = async_get_clientsession(self.hass)
+                # Forward the server-known state (self._state), not the user
+                # input — at this point they're equal, but explicitly sending
+                # the server-side value keeps the trust boundary clear.
                 token_data, error_key = await _async_exchange_code(
-                    session, code, self._code_verifier, pasted_state
+                    session, code, self._code_verifier, self._state
                 )
                 if token_data is None:
                     errors["base"] = error_key
@@ -335,20 +347,16 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
             if token_data is None:
                 errors["base"] = error_key
             else:
-                access_token = token_data.get("access_token")
-                if not access_token:
+                # Route through the same validator as the OAuth flow so both
+                # paths enforce the same "must have access+refresh" contract.
+                # Previously the manual flow silently fell back to the user's
+                # pasted refresh token if the response didn't include one,
+                # which could strand users on a just-rotated (now-invalid)
+                # token.
+                data = _token_data_to_entry(token_data)
+                if data is None:
                     errors["base"] = "invalid_token"
                 else:
-                    data = {
-                        CONF_ACCESS_TOKEN: access_token,
-                        CONF_REFRESH_TOKEN: token_data.get(
-                            "refresh_token", user_input[CONF_REFRESH_TOKEN]
-                        ),
-                        CONF_EXPIRES_AT: time.time()
-                        + token_data.get(
-                            "expires_in", DEFAULT_TOKEN_LIFETIME_SECS
-                        ),
-                    }
                     if user_input.get(CONF_CLIENT_ID):
                         data[CONF_CLIENT_ID] = user_input[CONF_CLIENT_ID]
                     return await self._async_finish(data)
@@ -359,7 +367,7 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    # --- Finish helper: branches on initial setup vs reconfigure ---
+    # --- Finish helper: branches on initial setup vs reconfigure vs reauth ---
 
     async def _async_finish(self, data: dict[str, Any]) -> ConfigFlowResult:
         """Create or update the config entry with the given token data."""
@@ -378,6 +386,10 @@ class ClaudeUsageConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class ClaudeUsageOptionsFlow(OptionsFlow):
     """Handle options for Claude Usage."""
+
+    # NB: the base OptionsFlow (HA 2024.11+) provides `self.config_entry`
+    # automatically. manifest.json requires homeassistant >= 2025.1.0, so
+    # relying on this is safe.
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
